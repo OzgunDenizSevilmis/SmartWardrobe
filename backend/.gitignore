@@ -1,0 +1,19 @@
+# Ortam değişkenleri
+.env
+
+# Model dosyaları
+*.h5
+
+# API ve e-posta dosyaları
+credentials.json
+gemini_api_request.py
+send_email.py
+send_email_smtp.py
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Virtualenv
+venv/
+venv310/
