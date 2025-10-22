@@ -6,6 +6,7 @@ import {
 import { LinearGradient } from 'expo-linear-gradient';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import FeatherIcon from 'react-native-vector-icons/Feather';
+import { getApiUrl } from '../config/config';
 
 // --- Diğer Ekranlardan Gelen Renk Paleti ---
 const COLORS = {
@@ -45,25 +46,98 @@ export default function ProfileScreen({ changeScreen, email }) {
     }
     setLoading(true);
     try {
-      const response = await fetch("http://192.168.40.37:5001/profile", {
+      console.log("🔄 Profil API çağrısı yapılıyor:", getApiUrl("/profile"));
+      console.log("📧 Gönderilen email:", email);
+      
+      const requestBody = { email };
+      console.log("📤 Request body:", JSON.stringify(requestBody));
+      
+      const response = await fetch(getApiUrl("/profile"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email })
+        body: JSON.stringify(requestBody)
       });
-      if (!response.ok) throw new Error('Profil bilgileri alınamadı.');
-      const data = await response.json();
-      if (data.email) {
-        setProfile(data);
-        // Düzenleme state'lerini başlangıç değerleriyle doldur
-        setEditableName(data.name || '');
-        setEditableSurname(data.surname || '');
-        setEditableStyle(data.style || '');
+      
+      console.log("📊 Response status:", response.status);
+      console.log("✅ Response ok:", response.ok);
+      
+      const responseText = await response.text();
+      console.log("📥 Raw response text:", responseText);
+      
+      if (response.ok) {
+        let data;
+        try {
+          data = JSON.parse(responseText);
+          console.log("✅ Parsed profile data:", data);
+        } catch (parseError) {
+          console.error("❌ JSON parse hatası:", parseError);
+          throw new Error("Sunucudan geçersiz JSON yanıtı alındı: " + responseText);
+        }
+        
+        if (data && data.email) {
+          setProfile(data);
+          setEditableName(data.name || '');
+          setEditableSurname(data.surname || '');
+          setEditableStyle(data.style || '');
+          console.log("✅ Profil başarıyla yüklendi:", data);
+        } else {
+          throw new Error("API'den eksik profil verisi alındı: " + JSON.stringify(data));
+        }
       } else {
-        Alert.alert("Kullanıcı Bulunamadı", "Profil bilgileri getirilemedi.");
+        console.error("❌ API Error status:", response.status);
+        console.error("❌ API Error response:", responseText);
+        
+        // Backend hatası varsa, geçici mock data göster
+        if (response.status === 500) {
+          console.log("🔧 Backend hatası tespit edildi, mock data kullanılıyor");
+          const mockProfile = {
+            email: email,
+            name: "Test",
+            surname: "Kullanıcı", 
+            style: "Casual"
+          };
+          setProfile(mockProfile);
+          setEditableName(mockProfile.name);
+          setEditableSurname(mockProfile.surname);
+          setEditableStyle(mockProfile.style);
+          Alert.alert("Uyarı", "Backend hatası nedeniyle test profili gösteriliyor. Gerçek profil için backend'i düzeltin.");
+          return;
+        }
+        
+        let errorMessage = `HTTP ${response.status}`;
+        try {
+          const errorData = JSON.parse(responseText);
+          errorMessage = errorData.message || errorMessage;
+        } catch (e) {
+          errorMessage = responseText || errorMessage;
+        }
+        
+        throw new Error(`Profil yüklenemedi: ${errorMessage}`);
       }
     } catch (err) {
-      console.error("Profil alınamadı:", err);
-      Alert.alert("Hata", err.message || "Profil bilgileri yüklenirken bir sorun oluştu.");
+      console.error("❌ Profil yükleme hatası:", err);
+      console.error("❌ Hata detayı:", err.message);
+      
+      // Network hatası da olabilir, mock data göster
+      const mockProfile = {
+        email: email,
+        name: "Test",
+        surname: "Kullanıcı", 
+        style: "Casual"
+      };
+      setProfile(mockProfile);
+      setEditableName(mockProfile.name);
+      setEditableSurname(mockProfile.surname);
+      setEditableStyle(mockProfile.style);
+      
+      Alert.alert(
+        "Bağlantı Hatası", 
+        `Backend'e bağlanılamadı. Test profili gösteriliyor.\n\nHata: ${err.message}`,
+        [
+          { text: "Tekrar Dene", onPress: fetchProfile },
+          { text: "Test Profiline Devam Et", style: "default" }
+        ]
+      );
     } finally {
       setLoading(false);
     }
@@ -88,35 +162,65 @@ export default function ProfileScreen({ changeScreen, email }) {
   };
 
   const handleSaveChanges = async () => {
-    // --- GERÇEK KAYDETME MANTIĞI BURAYA GELECEK ---
-    // Örneğin:
-    // try {
-    //   setLoading(true); // Veya farklı bir saving state
-    //   const response = await fetch('http://192.168.1.103:5001/update-profile', {
-    //     method: 'POST',
-    //     headers: { 'Content-Type': 'application/json' },
-    //     body: JSON.stringify({
-    //       email: profile.email,
-    //       name: editableName,
-    //       surname: editableSurname,
-    //       style: editableStyle,
-    //     }),
-    //   });
-    //   if (!response.ok) throw new Error('Profil güncellenemedi.');
-    //   const updatedProfile = await response.json();
-    //   setProfile(updatedProfile); // Profili güncelle
-    //   Alert.alert('Başarılı', 'Profil bilgileriniz güncellendi.');
-    //   setIsEditModalVisible(false);
-    // } catch (error) {
-    //   Alert.alert('Hata', error.message || 'Profil güncellenirken bir sorun oluştu.');
-    // } finally {
-    //   setLoading(false);
-    // }
-    // -----------------------------------------------
-    Alert.alert('Kaydedildi (Simülasyon)', `Ad: ${editableName}, Soyad: ${editableSurname}, Stil: ${editableStyle}`);
-    // Simülasyon için geçici olarak profili güncelleyelim (gerçekte backend'den gelmeli)
-    setProfile(prev => ({...prev, name: editableName, surname: editableSurname, style: editableStyle}));
-    setIsEditModalVisible(false);
+    if (!editableName.trim() || !editableSurname.trim()) {
+      Alert.alert('Eksik Bilgi', 'Ad ve soyad alanları boş bırakılamaz.');
+      return;
+    }
+
+    try {
+      setLoading(true);
+      console.log("Profil güncelleme isteği gönderiliyor:", {
+        email: profile.email,
+        name: editableName.trim(),
+        surname: editableSurname.trim(),
+        style: editableStyle.trim() || ''
+      });
+
+      const response = await fetch(getApiUrl("/update-profile"), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: profile.email,
+          name: editableName.trim(),
+          surname: editableSurname.trim(),
+          style: editableStyle.trim() || ''
+        }),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.log("Update profile error response:", errorText);
+        throw new Error(`Profil güncellenirken bir hata oluştu. Status: ${response.status}`);
+      }
+
+      const responseData = await response.json();
+      console.log("Update profile response:", responseData);
+      
+      // Backend'den dönen veriyi kontrol et
+      if (responseData.updatedUser) {
+        // Backend'den dönen güncellenmiş veriyi kullan
+        setProfile(responseData.updatedUser);
+        setEditableName(responseData.updatedUser.name);
+        setEditableSurname(responseData.updatedUser.surname);
+        setEditableStyle(responseData.updatedUser.style);
+      } else {
+        // Fallback: Local state'i güncelle
+        setProfile({
+          ...profile,
+          name: editableName.trim(),
+          surname: editableSurname.trim(),
+          style: editableStyle.trim() || ''
+        });
+      }
+      
+      Alert.alert('Başarılı', responseData.message || 'Profil bilgileriniz güncellendi.');
+      setIsEditModalVisible(false);
+    } catch (error) {
+      console.error('Profil güncelleme hatası:', error);
+      Alert.alert('Hata', error.message || 'Profil güncellenirken bir sorun oluştu.');
+    } finally {
+      setLoading(false);
+    }
   };
 
   if (loading) {
@@ -163,11 +267,6 @@ export default function ProfileScreen({ changeScreen, email }) {
                 <InfoRow label="Ana Stil" value={profile.style || "Belirtilmemiş"} icon="hanger" />
                 {/* Buraya daha fazla stil tercihi eklenebilir */}
               </View>
-              
-              <View style={styles.infoCard}>
-                <InfoRow label="Cinsiyet" value={profile.gender || "Erkek"} icon="hanger" />
-                {/* Buraya daha fazla stil tercihi eklenebilir */}
-              </View>
             </View>
 
             <TouchableOpacity style={styles.logoutButton} onPress={handleLogout}>
@@ -203,6 +302,7 @@ export default function ProfileScreen({ changeScreen, email }) {
                 placeholderTextColor={COLORS.textPlaceholder}
                 value={editableName}
                 onChangeText={setEditableName}
+                editable={!loading}
               />
             </View>
             <View style={styles.modalInputContainer}>
@@ -213,6 +313,7 @@ export default function ProfileScreen({ changeScreen, email }) {
                 placeholderTextColor={COLORS.textPlaceholder}
                 value={editableSurname}
                 onChangeText={setEditableSurname}
+                editable={!loading}
               />
             </View>
             <View style={styles.modalInputContainer}>
@@ -223,6 +324,7 @@ export default function ProfileScreen({ changeScreen, email }) {
                 placeholderTextColor={COLORS.textPlaceholder}
                 value={editableStyle}
                 onChangeText={setEditableStyle}
+                editable={!loading}
               />
             </View>
 
@@ -230,14 +332,20 @@ export default function ProfileScreen({ changeScreen, email }) {
                 <TouchableOpacity
                     style={[styles.modalButton, styles.modalCancelButton]}
                     onPress={() => setIsEditModalVisible(false)}
+                    disabled={loading}
                 >
                     <Text style={[styles.modalButtonText, styles.modalCancelButtonText]}>Vazgeç</Text>
                 </TouchableOpacity>
                 <TouchableOpacity
-                    style={[styles.modalButton, styles.modalSaveButton]}
+                    style={[styles.modalButton, styles.modalSaveButton, loading && { opacity: 0.7 }]}
                     onPress={handleSaveChanges}
+                    disabled={loading}
                 >
-                    <Text style={[styles.modalButtonText, styles.modalSaveButtonText]}>Kaydet</Text>
+                    {loading ? (
+                      <ActivityIndicator size="small" color={COLORS.primaryDark} />
+                    ) : (
+                      <Text style={[styles.modalButtonText, styles.modalSaveButtonText]}>Kaydet</Text>
+                    )}
                 </TouchableOpacity>
             </View>
           </View>

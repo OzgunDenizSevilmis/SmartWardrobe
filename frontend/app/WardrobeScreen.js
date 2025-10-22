@@ -6,6 +6,7 @@ import {
 import { LinearGradient } from 'expo-linear-gradient';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import FeatherIcon from 'react-native-vector-icons/Feather';
+import { getApiUrl } from '../config/config';
 
 // --- Diğer Ekranlardan Gelen Renk Paleti ---
 const COLORS = {
@@ -32,7 +33,7 @@ export default function WardrobeScreen({ changeScreen }) {
   const fetchWardrobe = async (isRefresh = false) => {
     if (!isRefresh) setLoading(true);
     try {
-      const response = await fetch(`http://192.168.40.37:5001/get-wardrobe?email=${email}`);
+      const response = await fetch(`${getApiUrl('/get-wardrobe')}?email=${email}`);
       if (!response.ok) throw new Error('Dolap verileri alınamadı.');
       const json = await response.json();
       setClothes(json.items || []);

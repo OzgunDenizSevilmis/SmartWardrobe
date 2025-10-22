@@ -6,6 +6,7 @@ import {
 import { LinearGradient } from 'expo-linear-gradient';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons'; // İkonlar için
 import FeatherIcon from 'react-native-vector-icons/Feather';
+import { getApiUrl } from '../config/config';
 
 // --- Diğer Ekranlardan Gelen Renk Paleti ---
 const COLORS = {
@@ -50,7 +51,7 @@ export default function RegisterScreen({ changeScreen }) {
 
     setLoading(true);
     try {
-      const response = await fetch('http://192.168.40.37:5001/register', {
+      const response = await fetch(getApiUrl('/register'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name, surname, email, password }),

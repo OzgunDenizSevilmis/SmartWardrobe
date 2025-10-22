@@ -7,6 +7,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import axios from 'axios';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import FeatherIcon from 'react-native-vector-icons/Feather';
+import { getApiUrl } from '../config/config';
 
 // --- MainScreen'den Gelen Renk Paleti ---
 const COLORS = {
@@ -37,12 +38,12 @@ export default function LoginScreen({ changeScreen }) {
     }
     setLoading(true);
     try {
-      const response = await axios.post("http://192.168.40.37:5001/login", {
+      const response = await axios.post(getApiUrl("/login"), {
         email, password
       });
 
       if (response.status === 200) {
-        const prefRes = await fetch(`http://192.168.40.37:5001/get-preferences?email=${email}`);
+        const prefRes = await fetch(`${getApiUrl("/get-preferences")}?email=${email}`);
         if (prefRes.status === 200) {
           changeScreen("Main", { email });
         } else {

@@ -6,6 +6,7 @@ import {
 import { LinearGradient } from 'expo-linear-gradient';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import FeatherIcon from 'react-native-vector-icons/Feather';
+import { getApiUrl } from '../config/config';
 
 // --- Diğer Ekranlardan Gelen Renk Paleti ---
 const COLORS = {
@@ -41,7 +42,7 @@ export default function PasswordResetScreen({ changeScreen }) {
     try {
       // API endpoint'ini kontrol edin, bir önceki kodda 192.168.40.37 kullanılmış,
       // diğerlerinde 192.168.1.103. Tutarlı olduğundan emin olun.
-      const response = await fetch("http://192.168.40.37:5001/password-reset", { // IP Adresini kontrol ettim
+      const response = await fetch(getApiUrl("/password-reset"), { // IP Adresini kontrol ettim
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email }),

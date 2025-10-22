@@ -371,43 +371,50 @@ def delete_wardrobe_item():
 
 @app.route("/profile", methods=["POST"])
 def get_profile():
+    cur = None
     try:
         data = request.get_json()
+        if not data:
+            return jsonify({"message": "İstek gövdesi boş."}), 400
+            
         email = data.get("email")
-
         if not email:
             return jsonify({"message": "Email gerekli."}), 400
 
+        # Global conn kullanın (get_db_connection yerine)
         cur = conn.cursor()
-        cur.execute("SELECT name, surname FROM users WHERE email = %s", (email,))
+        
+        # Kullanıcı bilgilerini al
+        cur.execute("SELECT name, surname, email FROM users WHERE email = %s", (email,))
         user_row = cur.fetchone()
 
         if not user_row:
-            cur.close()
             return jsonify({"message": "Kullanıcı bulunamadı."}), 404
 
+        # Stil tercihini al
         cur.execute(
-            "SELECT style_preference FROM user_preferences WHERE user_email = %s ORDER BY created_at DESC LIMIT 1",
+            "SELECT style_preference FROM user_preferences WHERE user_email = %s ORDER BY id DESC LIMIT 1",
             (email,)
         )
         style_row = cur.fetchone()
-        cur.close()
 
         return jsonify({
             "email": email,
-            "name": user_row[0],
-            "surname": user_row[1],
-            "style": style_row[0] if style_row else "Tanımsız"
-        })
+            "name": user_row[0] or "",
+            "surname": user_row[1] or "",
+            "style": style_row[0] if style_row and style_row[0] else "Tanımsız"
+        }), 200
 
     except Exception as e:
+        print(f"[ERROR] /profile - Hata: {str(e)}")
         return jsonify({"message": f"Profil alınamadı: {str(e)}"}), 500
-
+    finally:
+        if cur:
+            cur.close()
 
 
 @app.route("/update-profile", methods=["POST"])
-def update_user_profile_info(): # Fonksiyon adı farklı olmalı
-    conn = None
+def update_user_profile_info():
     cur = None
     try:
         data = request.get_json()
@@ -424,86 +431,99 @@ def update_user_profile_info(): # Fonksiyon adı farklı olmalı
         if not email:
             return jsonify({"message": "Güncelleme için 'email' gereklidir."}), 400
 
-        fields_to_update_sql_parts = []
-        values_to_update_params = []
-
-        if name_new is not None:
-            fields_to_update_sql_parts.append("name = %s")
-            values_to_update_params.append(name_new)
-        if surname_new is not None:
-            fields_to_update_sql_parts.append("surname = %s")
-            values_to_update_params.append(surname_new)
-        
-        style_updated_in_prefs = False
-        if style_new is not None:
-            conn_check = get_db_connection()
-            cur_check = conn_check.cursor()
-            cur_check.execute("SELECT id FROM user_preferences WHERE user_email = %s ORDER BY id DESC LIMIT 1", (email,))
-            existing_preference = cur_check.fetchone()
-            if existing_preference:
-                pref_id = existing_preference[0]
-                cur_check.execute("UPDATE user_preferences SET style_preference = %s WHERE id = %s", (style_new, pref_id))
-                if cur_check.rowcount > 0: style_updated_in_prefs = True
-            else:
-                cur_check.execute("INSERT INTO user_preferences (user_email, style_preference, color_preference) VALUES (%s, %s, %s)", (email, style_new, None))
-                if cur_check.rowcount > 0: style_updated_in_prefs = True
-            conn_check.commit()
-            cur_check.close()
-            conn_check.close()
-
-        if not fields_to_update_sql_parts and not style_updated_in_prefs:
-            return jsonify({"message": "Güncellenecek yeni bilgi gönderilmedi."}), 400
-
-        conn = get_db_connection()
+        # Global conn kullan (get_db_connection yerine)
         cur = conn.cursor()
 
-        if fields_to_update_sql_parts:
-            values_to_update_params.append(email)
-            user_sql_query_set_part = ", ".join(fields_to_update_sql_parts)
-            user_sql_query = f"UPDATE users SET {user_sql_query_set_part} WHERE email = %s"
-            print(f"[DEBUG] /update-profile - Users SQL: {cur.mogrify(user_sql_query, tuple(values_to_update_params)).decode('utf-8', 'ignore')}")
-            cur.execute(user_sql_query, tuple(values_to_update_params))
-            if cur.rowcount == 0 and not style_updated_in_prefs:
-                 conn.commit()
-                 return jsonify({"message": "Kullanıcı bulunamadı (users tablosu) veya bilgiler zaten aynıydı."}), 404
-        
-        conn.commit()
+        # Önce kullanıcının var olup olmadığını kontrol et
+        cur.execute("SELECT email FROM users WHERE email = %s", (email,))
+        if not cur.fetchone():
+            print(f"[DEBUG] /update-profile - Kullanıcı bulunamadı: {email}")
+            return jsonify({"message": "Kullanıcı bulunamadı."}), 404
 
-        final_profile_data_cur = conn.cursor()
-        final_profile_data_cur.execute("SELECT name, surname FROM users WHERE email = %s", (email,))
-        final_user_info = final_profile_data_cur.fetchone()
+        # Users tablosunu güncelle (name, surname)
+        users_updated = False
+        if name_new is not None or surname_new is not None:
+            update_fields = []
+            update_values = []
+            
+            if name_new is not None:
+                update_fields.append("name = %s")
+                update_values.append(name_new)
+            if surname_new is not None:
+                update_fields.append("surname = %s")
+                update_values.append(surname_new)
+            
+            update_values.append(email)
+            update_query = f"UPDATE users SET {', '.join(update_fields)} WHERE email = %s"
+            
+            print(f"[DEBUG] /update-profile - Users update query: {update_query}")
+            print(f"[DEBUG] /update-profile - Update values: {update_values}")
+            
+            cur.execute(update_query, tuple(update_values))
+            users_updated = cur.rowcount > 0
+
+        # Stil tercihini güncelle
+        style_updated = False
+        if style_new is not None:
+            # Mevcut tercihi kontrol et
+            cur.execute("SELECT id FROM user_preferences WHERE user_email = %s ORDER BY id DESC LIMIT 1", (email,))
+            existing_pref = cur.fetchone()
+            
+            if existing_pref:
+                # Var olan tercihi güncelle
+                cur.execute("UPDATE user_preferences SET style_preference = %s WHERE id = %s", 
+                           (style_new, existing_pref[0]))
+                style_updated = cur.rowcount > 0
+                print(f"[DEBUG] /update-profile - Mevcut stil tercihi güncellendi: {style_new}")
+            else:
+                # Yeni tercih kaydı oluştur
+                cur.execute("INSERT INTO user_preferences (user_email, style_preference, color_preference) VALUES (%s, %s, %s)", 
+                           (email, style_new, None))
+                style_updated = cur.rowcount > 0
+                print(f"[DEBUG] /update-profile - Yeni stil tercihi eklendi: {style_new}")
+
+        if not users_updated and not style_updated:
+            return jsonify({"message": "Güncellenecek bilgi gönderilmedi veya değişiklik yapılmadı."}), 400
+
+        # Değişiklikleri kaydet
+        conn.commit()
+        print(f"[DEBUG] /update-profile - Değişiklikler kaydedildi")
+
+        # Güncellenmiş profil bilgilerini getir ve döndür
+        cur.execute("SELECT name, surname FROM users WHERE email = %s", (email,))
+        updated_user = cur.fetchone()
         
-        final_profile_data_cur.execute("SELECT style_preference FROM user_preferences WHERE user_email = %s ORDER BY id DESC LIMIT 1", (email,))
-        final_style_info = final_profile_data_cur.fetchone()
-        final_profile_data_cur.close()
+        cur.execute("SELECT style_preference FROM user_preferences WHERE user_email = %s ORDER BY id DESC LIMIT 1", (email,))
+        updated_style = cur.fetchone()
         
-        response_user_data = {
+        response_data = {
             "email": email,
-            "name": final_user_info[0] if final_user_info else name_new,
-            "surname": final_user_info[1] if final_user_info else surname_new,
-            "style": final_style_info[0] if final_style_info else style_new
+            "name": updated_user[0] if updated_user and updated_user[0] else "",
+            "surname": updated_user[1] if updated_user and updated_user[1] else "",
+            "style": updated_style[0] if updated_style and updated_style[0] else "Tanımsız"
         }
         
-        print(f"[INFO] /update-profile - Profil güncellendi: {email}, Dönen Veri: {response_user_data}")
+        print(f"[INFO] /update-profile - Profil güncellendi: {response_data}")
         return jsonify({
             "message": "Profil başarıyla güncellendi.",
-            "updatedUser": response_user_data
+            "updatedUser": response_data
         }), 200
 
     except psycopg2.Error as db_err:
-        if conn: conn.rollback()
-        print(f"!!! VERİTABANI HATASI (/update-profile) !!!\nError: {db_err}\nSQLSTATE: {db_err.pgcode}\nDetay: {db_err.pgerror}")
-        return jsonify({"message": "Profil güncellenirken bir veritabanı sorunu oluştu."}), 500
+        conn.rollback()
+        print(f"!!! VERİTABANI HATASI (/update-profile) !!!")
+        print(f"Error: {db_err}")
+        return jsonify({"message": "Profil güncellenirken veritabanı hatası oluştu."}), 500
     except Exception as e:
-        if conn: conn.rollback()
+        conn.rollback()
         print(f"!!! GENEL SUNUCU HATASI (/update-profile) !!!")
+        print(f"Error: {str(e)}")
         import traceback
         traceback.print_exc()
-        return jsonify({"message": "Profil güncellenirken beklenmedik bir sunucu hatası oluştu."}), 500
+        return jsonify({"message": "Profil güncellenirken beklenmedik bir hata oluştu."}), 500
     finally:
-        if cur: cur.close()
-        if conn: conn.close()
-
+        if cur:
+            cur.close()
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5001, debug=True)

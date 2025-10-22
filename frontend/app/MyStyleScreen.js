@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { View, Text, TextInput, StyleSheet, TouchableOpacity, Alert } from 'react-native';
 import axios from 'axios';
+import { getApiUrl } from '../config/config';
 
 export default function MyStyleScreen() {
   const [style, setStyle] = useState('');
@@ -10,7 +11,7 @@ export default function MyStyleScreen() {
 
   const handleGetSuggestion = async () => {
     try {
-      const response = await axios.post('http://192.168.40.37:5001/gemini-suggestion', {
+      const response = await axios.post(getApiUrl('/gemini-suggestion'), {
         style,
         category,
         situation,

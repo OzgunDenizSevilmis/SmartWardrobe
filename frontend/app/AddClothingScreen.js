@@ -8,6 +8,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import * as ImagePicker from 'expo-image-picker';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import FeatherIcon from 'react-native-vector-icons/Feather';
+import { getApiUrl } from '../config/config';
 
 // --- Diğer Ekranlardan Gelen Renk Paleti ---
 const COLORS = {
@@ -74,7 +75,7 @@ export default function AddClothingScreen({ changeScreen }) {
           type: 'image/jpeg',
         });
 
-        const res = await fetch('http://192.168.40.37:5001/predict-colour', {
+        const res = await fetch(getApiUrl('/predict-colour'), {
           method: 'POST',
           body: formData,
           headers: { 'Content-Type': 'multipart/form-data' },
@@ -103,7 +104,7 @@ export default function AddClothingScreen({ changeScreen }) {
       const filename = `clothing_${email.split('@')[0]}_${Date.now()}.jpg`;
       uploadForm.append('image', { uri: imageUri, name: filename, type: 'image/jpeg' });
 
-      const uploadRes = await fetch('http://192.168.1.103:5001/upload', {
+      const uploadRes = await fetch(getApiUrl('/upload'), {
         method: 'POST', body: uploadForm, headers: { 'Content-Type': 'multipart/form-data' },
       });
       if (!uploadRes.ok) throw new Error('Görsel yükleme API hatası');
@@ -115,7 +116,7 @@ export default function AddClothingScreen({ changeScreen }) {
         style: styleType, baseColour: baseColor,
       };
 
-      const res = await fetch('http://192.168.1.103:5001/add-wardrobe-item', {
+      const res = await fetch(getApiUrl('/add-wardrobe-item'), {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
