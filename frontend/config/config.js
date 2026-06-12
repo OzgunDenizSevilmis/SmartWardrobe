@@ -2,7 +2,7 @@ import { API_URL } from '@env';
 
 // API configuration
 export const apiConfig = {
-  baseURL: API_URL || 'http://192.168.40.37:5001', // Fallback URL
+  baseURL: API_URL || 'http://172.20.10.2:5001', // Fallback URL
   endpoints: {
     login: '/login',
     register: '/register',

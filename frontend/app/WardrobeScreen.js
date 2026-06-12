@@ -8,16 +8,15 @@ import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import FeatherIcon from 'react-native-vector-icons/Feather';
 import { getApiUrl } from '../config/config';
 
-// --- Diğer Ekranlardan Gelen Renk Paleti ---
 const COLORS = {
   primaryDark: '#4A00E0',
   primaryLight: '#8E2DE2',
   accent: '#C9A7EB',
   accentBright: '#D2B4DE',
   textPrimary: 'rgba(255, 255, 255, 0.95)',
-  textSecondary: 'rgba(255, 255, 255, 0.75)', // Biraz daha görünür ikincil metin
+  textSecondary: 'rgba(255, 255, 255, 0.75)',
   textPlaceholder: 'rgba(255, 255, 255, 0.6)',
-  cardBackground: 'rgba(255, 255, 255, 0.09)', // Kartlar için hafif transparan
+  cardBackground: 'rgba(255, 255, 255, 0.09)',
   cardBorder: 'rgba(255, 255, 255, 0.18)',
   buttonTextDark: '#301934',
   white: '#FFFFFF',
@@ -27,8 +26,36 @@ const COLORS = {
 export default function WardrobeScreen({ changeScreen }) {
   const [clothes, setClothes] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false); // Yenileme durumu için
-  const email = 'ozgun541108@gmail.com'; // Bu dinamik olmalı
+  const [refreshing, setRefreshing] = useState(false);
+  const email = 'ozgun541108@gmail.com'; 
+
+  // --- AKILLI URL DÜZELTME SİSTEMİ ---
+  // Artık IP adresi hardcoded (elle yazılmış) değil.
+  // Config dosyasındaki API adresi neyse, resimleri oradan ister.
+  const fixImageUrl = (url) => {
+    if (!url) return null;
+
+    // 1. İNTERNET RESİMLERİ (Zalando, H&M vb.)
+    // Eğer resim bizim sunucudaki 'uploads' klasöründe değilse, dış linktir.
+    // Dış linklere dokunmuyoruz, olduğu gibi gösteriyoruz.
+    if (!url.includes('/uploads/')) {
+        return url;
+    }
+
+    // 2. YEREL RESİMLER (Bizim Backend'deki Uploads)
+    // Veritabanında eski IP yazıyor olabilir (örn: 192.168.40.37).
+    // Biz bunu umursamıyoruz. Dosya ismini alıp GÜNCEL backend adresine yapıştırıyoruz.
+    
+    // URL'den dosya adını söküp al (örn: "ceket.jpg")
+    const filename = url.split('/').pop();
+
+    // Şu anki geçerli Backend adresini config'den al
+    // getApiUrl('') genelde "http://192.168.1.112:5001" gibi bir şey döner.
+    const currentApiBase = getApiUrl('').replace(/\/$/, ''); // Sonunda slash varsa temizle
+
+    // Yeni ve çalışan URL'i oluştur
+    return `${currentApiBase}/uploads/${filename}`;
+  };
 
   const fetchWardrobe = async (isRefresh = false) => {
     if (!isRefresh) setLoading(true);
@@ -39,7 +66,6 @@ export default function WardrobeScreen({ changeScreen }) {
       setClothes(json.items || []);
     } catch (error) {
       console.error('Dolap yüklenemedi:', error);
-      // Kullanıcıya bir hata mesajı gösterilebilir (Alert vb.)
     } finally {
       if (!isRefresh) setLoading(false);
       if (isRefresh) setRefreshing(false);
@@ -57,7 +83,12 @@ export default function WardrobeScreen({ changeScreen }) {
 
   const renderItem = ({ item }) => (
     <View style={styles.card}>
-      <Image source={{ uri: item.image_url }} style={styles.image} />
+      {/* fixImageUrl sayesinde her zaman doğru adresi gösterir */}
+      <Image 
+        source={{ uri: fixImageUrl(item.image_url) }} 
+        style={styles.image} 
+        resizeMode="cover"
+      />
       <View style={styles.cardInfo}>
         <Text style={styles.cardCategory}>{item.category}</Text>
         <Text style={styles.cardText}>Stil: {item.style}</Text>
@@ -93,9 +124,8 @@ export default function WardrobeScreen({ changeScreen }) {
                 <FeatherIcon name="arrow-left" size={26} color={COLORS.accentBright} />
             </TouchableOpacity>
             <Text style={styles.screenTitle}>Dolabım</Text>
-            <View style={styles.backIconContainer} /> {/* Sağ tarafı boş bırakarak başlığı ortalamak için */}
+            <View style={styles.backIconContainer} />
         </View>
-
 
         {loading ? (
           <View style={styles.loaderContainer}>
@@ -106,18 +136,18 @@ export default function WardrobeScreen({ changeScreen }) {
           <FlatList
             data={clothes}
             renderItem={renderItem}
-            keyExtractor={(item, index) => item.id?.toString() || index.toString()} // item.id varsa kullan
+            keyExtractor={(item, index) => item.id?.toString() || index.toString()}
             contentContainerStyle={styles.listContentContainer}
-            numColumns={2} // İki sütunlu görünüm
-            columnWrapperStyle={styles.row} // Sütunlar arası boşluk için
+            numColumns={2}
+            columnWrapperStyle={styles.row}
             ListEmptyComponent={ListEmptyComponent}
-            refreshControl={ // Pull-to-refresh özelliği
+            refreshControl={
               <RefreshControl
                 refreshing={refreshing}
                 onRefresh={onRefresh}
-                colors={[COLORS.accentBright]} // iOS için spinner rengi
-                tintColor={COLORS.accentBright} // Android için spinner rengi
-                progressBackgroundColor={COLORS.primaryLight} // Android için spinner arkaplanı
+                colors={[COLORS.accentBright]}
+                tintColor={COLORS.accentBright}
+                progressBackgroundColor={COLORS.primaryLight}
               />
             }
           />
@@ -131,7 +161,7 @@ const styles = StyleSheet.create({
   flex: { flex: 1 },
   screenContainer: {
     flex: 1,
-    paddingTop: Platform.OS === 'android' ? 25 : 45, // Status bar için boşluk
+    paddingTop: Platform.OS === 'android' ? 25 : 45,
   },
   headerBar: {
     flexDirection: 'row',
@@ -140,13 +170,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingBottom: 15,
     marginBottom: 10,
-    // borderBottomWidth: 1, // İsteğe bağlı: başlık altına ince bir çizgi
-    // borderBottomColor: COLORS.cardBorder,
   },
   backIconContainer: {
-      padding: 5, // Dokunma alanını genişletmek için
-      width: 40, // Ortalama için sabit genişlik
-      alignItems: 'flex-start', // İkonu sola yasla
+      padding: 5,
+      width: 40,
+      alignItems: 'flex-start',
   },
   screenTitle: {
     fontSize: 24,
@@ -166,18 +194,18 @@ const styles = StyleSheet.create({
     fontWeight: '500',
   },
   listContentContainer: {
-    paddingHorizontal: 15, // Kartların kenarlardan taşmaması için
-    paddingBottom: 30, // Listenin sonuna boşluk
+    paddingHorizontal: 15,
+    paddingBottom: 30,
   },
   row: {
     flex: 1,
-    justifyContent: 'space-between', // İki kart arasına boşluk bırak
+    justifyContent: 'space-between',
   },
   card: {
     backgroundColor: COLORS.cardBackground,
-    borderRadius: 18, // Daha yuvarlak köşeler
+    borderRadius: 18,
     marginBottom: 15,
-    width: '48%', // İki sütun için, aradaki boşluğu hesaba kat
+    width: '48%',
     shadowColor: '#000000',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.15,
@@ -185,15 +213,14 @@ const styles = StyleSheet.create({
     elevation: 5,
     borderWidth: 1,
     borderColor: COLORS.cardBorder,
-    overflow: 'hidden', // Resmin kart dışına taşmasını engelle
+    overflow: 'hidden',
   },
   image: {
-    height: 180, // Resim yüksekliği
+    height: 180,
     width: '100%',
-    // borderRadius: 10, // Artık kartın kendisi yuvarlak
   },
   cardInfo: {
-    padding: 12, // Kart içi boşluklar
+    padding: 12,
   },
   cardCategory: {
     fontSize: 16,
@@ -225,7 +252,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     padding: 30,
-    marginTop: 50, // Başlıktan biraz aşağıda başlasın
+    marginTop: 50,
   },
   emptyText: {
     fontSize: 18,

@@ -70,7 +70,7 @@ export default function LoginScreen({ changeScreen }) {
         <View style={styles.container}>
           <View style={styles.headerContainer}>
             <Icon name="hanger" size={60} color={COLORS.accentBright} />
-            <Text style={styles.mainTitle}>OutfitApp</Text>
+            <Text style={styles.mainTitle}>SmartWardrobe</Text>
             <Text style={styles.subtitle}>Tarzına Giriş Yap</Text>
           </View>
 

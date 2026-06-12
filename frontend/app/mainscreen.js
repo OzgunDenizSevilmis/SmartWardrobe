@@ -8,6 +8,7 @@ import * as Location from 'expo-location';
 import { WEATHER_API_KEY } from '@env';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import FeatherIcon from 'react-native-vector-icons/Feather'; // Feather'ı da kullanalım çeşitlilik için
+import OutfitVisualizer from '../components/OutfitVisualizer';
 
 // --- Renk Paleti (Kullanıcının tercih ettiği mor tonları baz alınarak geliştirildi) ---
 const COLORS = {
@@ -42,6 +43,7 @@ export default function MainScreen({ changeScreen }) {
   const [loading, setLoading] = useState(false);
   const [email] = useState("ozgun541108@gmail.com");
   const [userPrompt, setUserPrompt] = useState("");
+  const [outfitImages, setOutfitImages] = useState(null); // Kombin görselleri için state
 
   const fetchWeatherAndSuggestion = async () => {
     if (!userPrompt.trim()) {
@@ -80,7 +82,7 @@ export default function MainScreen({ changeScreen }) {
       const weatherData = await weatherRes.json();
       setWeather(weatherData);
 
-      const backendUrl = "http://192.168.40.37:5001/generate-outfit";
+      const backendUrl = "http://172.20.10.2:5001/generate-outfit";
       const res = await fetch(backendUrl, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -92,6 +94,23 @@ export default function MainScreen({ changeScreen }) {
       if (!res.ok) throw new Error(`Kombin önerisi alınamadı (${res.status})`);
       const data = await res.json();
       setSuggestion(data.suggestion || "Bugün için sana özel bir kombin bulamadık, belki farklı bir anahtar kelime denersin?");
+
+      // Backend'den gelen kombin görsellerini ayarla
+      // Backend'inizin { outfit_images: { top: 'url', bottom: 'url', shoes: 'url' } } formatında dönmesini sağlayın
+      if (data.outfit_images) {
+        setOutfitImages({
+          top: data.outfit_images.top,
+          bottom: data.outfit_images.bottom,
+          shoes: data.outfit_images.shoes
+        });
+      }
+      
+      // *** TEST AMAÇLI ÖRNEK VERİ (Backend hazır değilse bunu aktif edin) ***
+      // setOutfitImages({
+      //   top: 'https://images.unsplash.com/photo-1521572163474-6864f9cf17ab?w=400',
+      //   bottom: 'https://images.unsplash.com/photo-1542272604-787c3835535d?w=400',
+      //   shoes: 'https://images.unsplash.com/photo-1549298916-b41d501d3772?w=400'
+      // });
 
     } catch (error) {
       console.error("❌ Hata:", error);
@@ -168,6 +187,17 @@ export default function MainScreen({ changeScreen }) {
                 <Text style={[styles.resultCardTitle, { color: COLORS.success }]}>Stil Önerin</Text>
               </View>
               <Text style={styles.resultCardContent}>{suggestion}</Text>
+            </View>
+          )}
+
+          {/* Kombin Görseli - OutfitVisualizer Kullanımı */}
+          {outfitImages && !loading && (
+            <View style={{ marginBottom: 20 }}>
+              <View style={styles.resultCardHeader}>
+                <Icon name="hanger" size={28} color={COLORS.accent} />
+                <Text style={[styles.resultCardTitle, { color: COLORS.accent }]}>Kombin Önizlemesi</Text>
+              </View>
+              <OutfitVisualizer outfitData={outfitImages} />
             </View>
           )}
            {!suggestion && !loading && userPrompt && (

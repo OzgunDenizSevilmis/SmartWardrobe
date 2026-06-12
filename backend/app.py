@@ -10,6 +10,9 @@ from PIL import Image
 import numpy as np
 from tensorflow.keras.models import load_model
 from gemini_api_request import generate_outfit_suggestion, get_weather_info
+import socket # IP tespiti için eklendi
+import random
+
 
 # .env değişkenleri
 load_dotenv()
@@ -17,8 +20,30 @@ load_dotenv()
 app = Flask(__name__)
 CORS(app, resources={r"/*": {"origins": "*"}})
 
+# --- OTOMATİK IP TESPİT FONKSİYONU ---
+def get_local_ip():
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        # Google DNS'e bağlanmaya çalışarak (bağlanmasa bile) local IP'yi öğrenir
+        s.connect(("8.8.8.8", 80))
+        local_ip = s.getsockname()[0]
+        s.close()
+        return local_ip
+    except Exception:
+        return "127.0.0.1"
+
+# Başlangıçta IP'yi otomatik bul ve kaydet
+CURRENT_IP = get_local_ip()
+CURRENT_PORT = "5001"
+
+print(f"\n==================================================")
+print(f"✅ SUNUCU BU IP'DE ÇALIŞIYOR: http://{CURRENT_IP}:{CURRENT_PORT}")
+print(f"⚠️  Frontend (Mobil) config dosyanı bu IP ile güncellemeyi unutma!")
+print(f"==================================================\n")
+
 reset_tokens = {}
 
+# Veritabanı Bağlantısı
 conn = psycopg2.connect(
     dbname=os.getenv("DB_NAME"),
     user=os.getenv("DB_USER"),
@@ -27,8 +52,12 @@ conn = psycopg2.connect(
     port=os.getenv("DB_PORT")
 )
 
+# Renk Modeli Yükleme
+try:
+    model = load_model("basecolour_model.h5")
+except Exception as e:
+    print("Model yüklenemedi, renk tahmini çalışmayabilir:", e)
 
-model = load_model("basecolour_model.h5")
 class_names = [
     'Beige', 'Black', 'Blue', 'Bronze', 'Brown', 'Burgundy', 'Charcoal',
     'Coffee Brown', 'Copper', 'Cream', 'Fluorescent Green', 'Gold', 'Green',
@@ -37,6 +66,13 @@ class_names = [
     'Orange', 'Peach', 'Pink', 'Purple', 'Red', 'Rust', 'Sea Green', 'Silver',
     'Skin', 'Steel', 'Tan', 'Taupe', 'Teal', 'Turquoise Blue', 'White', 'Yellow'
 ]
+
+# Klasör Ayarı
+UPLOAD_FOLDER = 'uploads'
+if not os.path.exists(UPLOAD_FOLDER):
+    os.makedirs(UPLOAD_FOLDER)
+
+# ------------------ ENDPOINTS ------------------ #
 
 @app.route("/register", methods=["POST"])
 def register():
@@ -104,7 +140,9 @@ def password_reset():
 
         token = uuid4().hex
         reset_tokens[token] = email
-        reset_link = f"http://{request.host}/resetpassword.html?token={token}"
+        
+        # Link dinamik IP ile oluşturulur
+        reset_link = f"http://{CURRENT_IP}:{CURRENT_PORT}/resetpassword.html?token={token}"
 
         sender = os.getenv("EMAIL_ADRESS")
         password = os.getenv("EMAIL_PASSWORD")
@@ -220,19 +258,16 @@ def generate_outfit():
     try:
         data = request.get_json()
         email = data.get("email")
-        style = data.get("style")
-        usage = data.get("usage")
-        category = data.get("subcategory")
+        style_request = data.get("style") # Örn: Spor, Klasik
+        usage = data.get("usage", "").lower() # Örn: iş görüşmesi, halı saha
         city = data.get("city")
 
-        print("📥 Gelen veri:", data)
-
-        if not all([email, style, usage, category, city]):
+        if not all([email, style_request, usage, city]):
             return jsonify({"error": "Eksik parametre"}), 400
 
         cur = conn.cursor()
         cur.execute(
-            "SELECT category, style, base_colour FROM wardrobe_items WHERE user_email = %s",
+            "SELECT category, style, base_colour, image_uri FROM wardrobe_items WHERE user_email = %s",
             (email,)
         )
         rows = cur.fetchall()
@@ -240,32 +275,136 @@ def generate_outfit():
 
         if not rows:
             return jsonify({"error": "Dolap boş."}), 400
-        if len(rows) < 3:
-            return jsonify({"error": "Dolabınızda yeterli kıyafet yok."}), 400
+        
+        # --- 1. VERİLERİ HAZIRLA ---
+        all_items = []
+        for row in rows:
+            cat, item_style, color, url = row
+            
+            # URL Düzeltme (Telefonda görünsün diye)
+            if url and ('localhost' in url or '127.0.0.1' in url):
+                url = url.replace('localhost', CURRENT_IP).replace('127.0.0.1', CURRENT_IP)
+                if ':5000' in url and CURRENT_PORT == '5001':
+                    url = url.replace(':5000', ':5001')
+            
+            all_items.append({
+                "desc": f"{color} {cat} ({item_style})", 
+                "url": url, 
+                "category": cat, 
+                "style": item_style,
+                "color": color
+            })
 
-        wardrobe_text = "\n".join([
-            f"- {row[0]} ({row[1]}, {row[2]})"
-            for row in rows
-        ])
+        # --- 2. MANTIK MOTORU (Event Rules) ---
+        # Burada "Nereye gidiyorsun?" cevabına göre Yasaklar ve Zorunluluklar belirliyoruz.
+        
+        forbidden_colors = []      # Asla seçilmeyecek renkler
+        forbidden_categories = []  # Asla seçilmeyecek türler (örn: iş için şort)
+        preferred_styles = []      # Öncelikli stiller
+        
+        # SENARYO A: İŞ GÖRÜŞMESİ / CİDDİ ORTAM
+        if any(x in usage for x in ['iş', 'mülakat', 'ofis', 'toplantı', 'resmi', 'sunum']):
+            forbidden_colors = ['Green', 'Red', 'Orange', 'Yellow', 'Pink', 'Purple', 'Gold', 'Fluorescent Green']
+            forbidden_categories = ['Şort', 'Eşofman', 'Terlik', 'Sandalet', 'Hoodie', 'Sweatshirt', 'Jogger']
+            preferred_styles = ['Resmi', 'Klasik', 'Basic']
+            print("LOGIC: İş Modu Aktif - Cırtlak renkler ve şortlar yasaklandı.")
+
+        # SENARYO B: SPOR / YÜRÜYÜŞ
+        elif any(x in usage for x in ['spor', 'yürüyüş', 'koşu', 'gym', 'antrenman']):
+            forbidden_categories = ['Gömlek', 'Bot', 'Topuklu', 'Klasik Ayakkabı', 'Blazer']
+            preferred_styles = ['Spor', 'Sokak']
+            print("LOGIC: Spor Modu Aktif - Gömlekler yasaklandı.")
+
+        # --- 3. FİLTRELEME FONKSİYONU ---
+        def is_item_allowed(item):
+            # 1. Renk Yasağı Kontrolü
+            if item['color'] in forbidden_colors:
+                return False
+            # 2. Kategori Yasağı Kontrolü
+            # (Veritabanındaki kategori isminin içinde yasaklı kelime geçiyor mu?)
+            if any(bad_cat.lower() in item['category'].lower() for bad_cat in forbidden_categories):
+                return False
+            return True
+
+        # Kurallara uyanları ayıkla
+        allowed_items = [i for i in all_items if is_item_allowed(i)]
+        
+        # Eğer kurallar çok sıkıysa ve hiç eşya kalmadıysa, kuralları gevşet (Yedek Plan)
+        if len(allowed_items) < 2:
+            allowed_items = all_items 
+            print("UYARI: Kurallar çok sıkıydı, dolapta uygun parça yok. Filtreler kaldırıldı.")
+
+        # --- 4. KATEGORİLERE AYIRMA ---
+        tops = []
+        bottoms = []
+        shoes = []
+        accessories = []
+
+        top_keywords = ['T-shirt', 'Gömlek', 'Kazak', 'Hırka', 'Ceket', 'Mont', 'Sweatshirt', 'Büstiyer', 'Bluz', 'Hoodie', 'Üst']
+        bottom_keywords = ['Pantolon', 'Şort', 'Eşofman', 'Etek', 'Tayt', 'Jean', 'Alt']
+        shoe_keywords = ['Ayakkabı', 'Spor', 'Bot', 'Çizme', 'Sandalet', 'Terlik']
+        accessory_keywords = ['Aksesuar', 'Saat', 'Gözlük', 'Kolye', 'Şapka', 'Çanta']
+
+        for item in allowed_items:
+            cat = item['category']
+            if any(k in cat for k in top_keywords): tops.append(item)
+            elif any(k in cat for k in bottom_keywords): bottoms.append(item)
+            elif any(k in cat for k in shoe_keywords): shoes.append(item)
+            elif any(k in cat for k in accessory_keywords): accessories.append(item)
+
+        # --- 5. TERCİHLİ STİL SEÇİMİ (Soft Priority) ---
+        # Eğer "İş" dediysek, öncelikle "Resmi" etiketli olanlardan seçmeye çalış
+        def pick_best(item_list):
+            if not item_list: return None
+            # Tercih edilen stillerden biri var mı?
+            preferred = [i for i in item_list if any(s.lower() in i['style'].lower() for s in preferred_styles)]
+            if preferred:
+                return random.choice(preferred) # Varsa onlardan seç
+            return random.choice(item_list)     # Yoksa kalanlardan seç
+
+        selected_top = pick_best(tops)
+        selected_bottom = pick_best(bottoms)
+        selected_shoes = pick_best(shoes)
+        selected_accessory = random.choice(accessories) if accessories else None
+
+        if not selected_top and not selected_bottom:
+             return jsonify({"error": "Uygun parça bulunamadı."}), 400
+
+        # --- 6. PROMPT ---
+        selected_items_text = []
+        if selected_top: selected_items_text.append(f"Üst: {selected_top['desc']}")
+        if selected_bottom: selected_items_text.append(f"Alt: {selected_bottom['desc']}")
+        if selected_shoes: selected_items_text.append(f"Ayakkabı: {selected_shoes['desc']}")
+        if selected_accessory: selected_items_text.append(f"Aksesuar: {selected_accessory['desc']}")
+
+        selection_summary = ", ".join(selected_items_text)
 
         prompt = (
-            f"Kullanıcı {style} stilinde giyinmek istiyor ve \"{usage}\" diyor.\n"
-            f"Şehir: {city}\n"
-            f"Dolap:\n{wardrobe_text}\n"
-            f"Bu bilgilere göre bir tane en ideal kombin önerisi yap. Öneriyi her bir giysi türü için kısa açıklamalarla birlikte, detaylı bir şekilde sun. Her bir maddeyi 1-2 cümleyle açıkla. Cevabını sadece düz metin olarak, hiçbir şekilde kalın (bold) veya başka Markdown biçimlendirmesi (örn. **, #, -) kullanmadan ver. Toplamda 4-5 cümle civarında, akıcı ve bilgilendirici bir yanıt olsun."
+            f"Sen profesyonel bir imaj danışmanısın. Kullanıcı şu etkinliğe gidiyor: \"{usage}\".\n"
+            f"Bu ciddiyete/duruma uygun olarak dolabından şu parçaları özenle seçtik: {selection_summary}.\n"
+            f"Lütfen bu parçaların neden bu etkinlik için ({usage}) doğru tercih olduğunu, renklerin psikolojik etkisini veya stilin uygunluğunu vurgulayarak anlat.\n"
+            f"Ayrıca kullanıcıya etkinlik için profesyonel bir duruş tüyosu ver.\n"
+            f"Cevabın Türkçe, samimi ama profesyonel, kısa (max 3 cümle) olsun."
         )
 
         print("🧠 Prompt:\n", prompt)
+        suggestion_text = generate_outfit_suggestion(prompt)
+        print("📬 Gemini yanıtı:\n", suggestion_text)
 
-        suggestion = generate_outfit_suggestion(prompt)
+        response_data = {
+            "suggestion": suggestion_text,
+            "outfit_images": {
+                "top": selected_top['url'] if selected_top else None,
+                "bottom": selected_bottom['url'] if selected_bottom else None,
+                "shoes": selected_shoes['url'] if selected_shoes else None
+            }
+        }
 
-        print("📬 Gemini yanıtı:\n", suggestion)
+        return jsonify(response_data)
 
-        return jsonify({"suggestion": suggestion})
     except Exception as e:
-        print("❌ Backend hatası:", e)
+        print("❌ Hata:", e)
         return jsonify({"error": str(e)}), 500
-
 
 @app.route("/add-wardrobe-item", methods=["POST"])
 def add_wardrobe_item():
@@ -316,10 +455,7 @@ def get_wardrobe():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-# ------------------ Görsel Yükleme ------------------ #
-UPLOAD_FOLDER = 'uploads'
-if not os.path.exists(UPLOAD_FOLDER):
-    os.makedirs(UPLOAD_FOLDER)
+# ------------------ GÖRSEL YÜKLEME VE SUNMA (KRİTİK) ------------------ #
 
 @app.route('/upload', methods=['POST'])
 def upload():
@@ -335,13 +471,17 @@ def upload():
     filepath = os.path.join(UPLOAD_FOLDER, filename)
     file.save(filepath)
 
-    ip = request.host.split(":")[0]
-    port = request.host.split(":")[1] if ":" in request.host else "5001"
+    # DİNAMİK IP KULLANIMI:
+    # Artık IP değişse bile backend kendi IP'sini otomatik algılayıp koyacak.
+    image_url = f'http://{CURRENT_IP}:{CURRENT_PORT}/uploads/{filename}'
+
+    print(f"✅ Yeni resim yüklendi: {image_url}")
 
     return jsonify({
-        'image_url': f'http://{ip}:{port}/uploads/{filename}'
+        'image_url': image_url
     }), 200
 
+# Bu fonksiyonun olması ŞART, resimleri bu endpoint sunuyor
 @app.route('/uploads/<filename>')
 def serve_image(filename):
     return send_from_directory(UPLOAD_FOLDER, filename)
@@ -381,17 +521,14 @@ def get_profile():
         if not email:
             return jsonify({"message": "Email gerekli."}), 400
 
-        # Global conn kullanın (get_db_connection yerine)
         cur = conn.cursor()
         
-        # Kullanıcı bilgilerini al
         cur.execute("SELECT name, surname, email FROM users WHERE email = %s", (email,))
         user_row = cur.fetchone()
 
         if not user_row:
             return jsonify({"message": "Kullanıcı bulunamadı."}), 404
 
-        # Stil tercihini al
         cur.execute(
             "SELECT style_preference FROM user_preferences WHERE user_email = %s ORDER BY id DESC LIMIT 1",
             (email,)
@@ -412,7 +549,6 @@ def get_profile():
         if cur:
             cur.close()
 
-
 @app.route("/update-profile", methods=["POST"])
 def update_user_profile_info():
     cur = None
@@ -421,8 +557,6 @@ def update_user_profile_info():
         if not data:
             return jsonify({"message": "İstek gövdesi boş veya JSON formatında değil."}), 400
         
-        print(f"[DEBUG] /update-profile - Gelen veri: {data}")
-
         email = data.get("email")
         name_new = data.get("name")
         surname_new = data.get("surname")
@@ -431,16 +565,12 @@ def update_user_profile_info():
         if not email:
             return jsonify({"message": "Güncelleme için 'email' gereklidir."}), 400
 
-        # Global conn kullan (get_db_connection yerine)
         cur = conn.cursor()
 
-        # Önce kullanıcının var olup olmadığını kontrol et
         cur.execute("SELECT email FROM users WHERE email = %s", (email,))
         if not cur.fetchone():
-            print(f"[DEBUG] /update-profile - Kullanıcı bulunamadı: {email}")
             return jsonify({"message": "Kullanıcı bulunamadı."}), 404
 
-        # Users tablosunu güncelle (name, surname)
         users_updated = False
         if name_new is not None or surname_new is not None:
             update_fields = []
@@ -456,40 +586,28 @@ def update_user_profile_info():
             update_values.append(email)
             update_query = f"UPDATE users SET {', '.join(update_fields)} WHERE email = %s"
             
-            print(f"[DEBUG] /update-profile - Users update query: {update_query}")
-            print(f"[DEBUG] /update-profile - Update values: {update_values}")
-            
             cur.execute(update_query, tuple(update_values))
             users_updated = cur.rowcount > 0
 
-        # Stil tercihini güncelle
         style_updated = False
         if style_new is not None:
-            # Mevcut tercihi kontrol et
             cur.execute("SELECT id FROM user_preferences WHERE user_email = %s ORDER BY id DESC LIMIT 1", (email,))
             existing_pref = cur.fetchone()
             
             if existing_pref:
-                # Var olan tercihi güncelle
                 cur.execute("UPDATE user_preferences SET style_preference = %s WHERE id = %s", 
                            (style_new, existing_pref[0]))
                 style_updated = cur.rowcount > 0
-                print(f"[DEBUG] /update-profile - Mevcut stil tercihi güncellendi: {style_new}")
             else:
-                # Yeni tercih kaydı oluştur
                 cur.execute("INSERT INTO user_preferences (user_email, style_preference, color_preference) VALUES (%s, %s, %s)", 
                            (email, style_new, None))
                 style_updated = cur.rowcount > 0
-                print(f"[DEBUG] /update-profile - Yeni stil tercihi eklendi: {style_new}")
 
         if not users_updated and not style_updated:
             return jsonify({"message": "Güncellenecek bilgi gönderilmedi veya değişiklik yapılmadı."}), 400
 
-        # Değişiklikleri kaydet
         conn.commit()
-        print(f"[DEBUG] /update-profile - Değişiklikler kaydedildi")
 
-        # Güncellenmiş profil bilgilerini getir ve döndür
         cur.execute("SELECT name, surname FROM users WHERE email = %s", (email,))
         updated_user = cur.fetchone()
         
@@ -503,27 +621,19 @@ def update_user_profile_info():
             "style": updated_style[0] if updated_style and updated_style[0] else "Tanımsız"
         }
         
-        print(f"[INFO] /update-profile - Profil güncellendi: {response_data}")
         return jsonify({
             "message": "Profil başarıyla güncellendi.",
             "updatedUser": response_data
         }), 200
 
-    except psycopg2.Error as db_err:
-        conn.rollback()
-        print(f"!!! VERİTABANI HATASI (/update-profile) !!!")
-        print(f"Error: {db_err}")
-        return jsonify({"message": "Profil güncellenirken veritabanı hatası oluştu."}), 500
     except Exception as e:
         conn.rollback()
-        print(f"!!! GENEL SUNUCU HATASI (/update-profile) !!!")
-        print(f"Error: {str(e)}")
-        import traceback
-        traceback.print_exc()
-        return jsonify({"message": "Profil güncellenirken beklenmedik bir hata oluştu."}), 500
+        print(f"!!! GÜNCELLEME HATASI !!!: {str(e)}")
+        return jsonify({"message": "Profil güncellenirken hata oluştu."}), 500
     finally:
         if cur:
             cur.close()
 
+# Uygulamayı dışa açmak için host='0.0.0.0' önemli
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5001, debug=True)
+    app.run(host="0.0.0.0", port=int(CURRENT_PORT), debug=True)
